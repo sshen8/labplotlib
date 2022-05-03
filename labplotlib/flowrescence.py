@@ -2,24 +2,60 @@
 For flow fluorescence data
 """
 from argparse import ArgumentError
-import datetime
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
 import os
 import re
 from shapely.geometry import Polygon, Point, LineString
+import warnings
 
-def read_csv(timepoints, regex):
+def read_csv(folder):
     """
-    `timepoints`: dict of folders containing csv data mapped to datetime.datetime of data collection
+    subfolders in `folder` are "specimens". csv files in subfolders are "samples".
+    returns concatenated dataframes where index is (specimen, sample)
     """
-    return pd.concat(
-        {(sample_time, re.search(regex, file)["sample_name"]): pd.read_csv(os.path.join(folder_timepoint, file)).add_prefix("data_")
-                for folder_timepoint, sample_time in timepoints.items()
-                for file in os.listdir(folder_timepoint)},
-        names=("sample_time", "sample_name")
-    )
+    df = {}
+    for folder_specimen in os.listdir(folder):
+        subfolder = os.path.join(folder, folder_specimen)
+        if not os.path.isdir(subfolder):
+            continue
+        for file in os.listdir(subfolder):
+            sample_name = re.search("[A-H]1?[0-9]_(.*)\.csv", file).group(1)
+            df[(folder_specimen, sample_name)] = pd.read_csv(os.path.join(subfolder, file)).add_prefix("data_")
+    return pd.concat(df, names=("fname_specimen", "fname_sample"))
+
+def parse_index(df, level, regex=None, apply=None, names=None, replace=None, default=None, droplevel=False):
+    """
+    maps `level` to new level `names` using mapping:
+        - `regex` where group names should correspond to new levels
+        - `apply` is a function, output can be tuple
+        - `replace` is a dict, output can be tuple
+    """
+    if names is None:
+        names = tuple()
+    elif isinstance(names, str):
+        names = (names,)
+    if default is None and regex is not None:
+        default = dict()
+    newdf = {}
+    for idx, group in df.groupby(level):
+        if regex is not None:
+            match = re.search(regex, idx)
+            if match:
+                match = match.groupdict()
+            else:
+                warnings.warn(f"dropping {idx} because no regex match")
+                continue
+            ind = tuple(match.get(x, default.get(x)) for x in names)
+        elif apply is not None:
+            ind = apply(idx)
+        elif replace is not None:
+            ind = replace.get(idx, default)
+        if droplevel:
+            newdf[ind] = group.droplevel(level=level)
+        else:
+            newdf[ind] = group
+    return pd.concat(newdf, names=names)
 
 def log10(series):
     return np.log10(series.clip(lower=1))
