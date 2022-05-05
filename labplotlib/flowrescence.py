@@ -60,6 +60,21 @@ def parse_index(df, level, regex=None, apply=None, names=None, replace=None, def
             newdf[ind] = toappend
     return pd.concat(newdf, names=names)
 
+def split_sample(df, splits, level_time="sample_time", level_sample="fname_sample"):
+    newdf = {}
+    for (fname_sample, sample_time), group in df.groupby([level_sample, level_time]):
+        split = splits.get(fname_sample)
+        if split is None or split["split_on"] > sample_time:
+            newdf[(fname_sample, sample_time)] = group.droplevel([level_sample, level_time])
+            continue
+        # TODO, make this recursive i.e. look what else this should get split into further down the line
+        for split_to in split["split_to"]:
+            newdf[(split_to, sample_time)] = group.droplevel([level_sample, level_time])
+    return pd.concat(newdf, names=(level_sample, level_time))
+
+def squeeze_index(df):
+    return df.droplevel([idx for idx in df.index.names if df.index.unique(idx).size <= 1])
+
 def log10(series):
     return np.log10(series.clip(lower=1))
 
