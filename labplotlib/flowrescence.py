@@ -8,6 +8,8 @@ import os
 import re
 from shapely.geometry import Polygon, Point, LineString
 import warnings
+from matplotlib import pyplot as plt
+from seaborn.utils import adjust_legend_subtitles
 
 def read_csv(folder):
     """
@@ -103,3 +105,51 @@ def gate2d(df, boundary, interior=True):
 
 def norm_day0(df):
     return
+
+def _plot_hist_default_cmap():
+    return plt.cm.winter
+
+def _plot_hist_default_norm(df, hue_level):
+    level_values = df.index.unique(hue_level)
+    return plt.Normalize(vmin=level_values.min(), vmax=level_values.max())
+
+def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None):
+    if cmap is None:
+        cmap = _plot_hist_default_cmap()
+    if norm is None:
+        norm = _plot_hist_default_norm(df, hue_level)
+    if data_column[:5] != "data_":
+        data_column = f"data_{data_column}"
+    assert data_column in FLUOR_CHANNELS
+    df = squeeze_index(df)
+    for level in df.index.names:
+        if level not in (hue_level, "fname_sample", "fname_specimen", None):
+            warnings.warn(f"combining experiment conditions: {level} = {df.index.unique(level)}")
+    if isinstance(bins, int):
+        bins = np.logspace(np.log10(df[data_column].min()), np.log10(df[data_column].max()), bins + 1)
+    log_bins = np.log10(bins)
+    bins_ctr = np.power(10, log_bins[:-1] + 0.5 * np.diff(log_bins))
+    for hue_val, group in df.groupby(hue_level):
+        bin_counts, _ = np.histogram(group[data_column], bins=bins)
+        bin_mass = bin_counts / bin_counts.sum()
+        ax.fill_between(x=bins_ctr, y1=0, y2=bin_mass, alpha=0.4, color=cmap(norm(hue_val)))
+    ax.set_ylim(bottom=0)
+    ax.set_yticks([])
+    ax.set_xscale("log")
+
+def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=None, captions=None):
+    if cmap is None:
+        cmap = _plot_hist_default_cmap()
+    if norm is None:
+        norm = _plot_hist_default_norm(df, hue_level)
+    if title:
+        ax.plot([], [], label=title, visible=False)
+    if captions is None:
+        captions = lambda x: x
+    elif isinstance(captions, dict):
+        captions = lambda x: captions.get(x, x)
+    for hue_val in sorted(df.index.unique(hue_level), key=norm):
+        ax.fill_between(x=[], y1=[], y2=[], alpha=0.4, label=captions(hue_val), color=cmap(norm(hue_val)))
+    ax.axis("off")
+    legend = ax.legend(loc="center")
+    adjust_legend_subtitles(legend)
