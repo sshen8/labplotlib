@@ -51,10 +51,13 @@ def parse_index(df, level, regex=None, apply=None, names=None, replace=None, def
             ind = apply(idx)
         elif replace is not None:
             ind = replace.get(idx, default)
+        toappend = group
         if droplevel:
-            newdf[ind] = group.droplevel(level=level)
+            toappend = toappend.droplevel(level=level)
+        if ind in newdf:
+            newdf[ind] = pd.concat([newdf[ind], toappend])
         else:
-            newdf[ind] = group
+            newdf[ind] = toappend
     return pd.concat(newdf, names=names)
 
 def log10(series):
