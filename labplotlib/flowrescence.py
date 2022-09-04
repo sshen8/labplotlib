@@ -43,12 +43,10 @@ def parse_index(df, level, regex=None, apply=None, names=None, replace=None, def
     for idx, group in df.groupby(level):
         if regex is not None:
             match = re.search(regex, idx)
-            if match:
-                match = match.groupdict()
-            else:
+            if not match:
                 warnings.warn(f"dropping {idx} because no regex match")
                 continue
-            ind = tuple(match.get(x, default.get(x)) for x in names)
+            ind = tuple(match[x] if match[x] else default.get(x) for x in names)
         elif apply is not None:
             ind = apply(idx)
         elif replace is not None:
@@ -66,7 +64,7 @@ def split_sample(df, splits, level_time="sample_time", level_sample="fname_sampl
     newdf = {}
     for (fname_sample, sample_time), group in df.groupby([level_sample, level_time]):
         split = splits.get(fname_sample)
-        if split is None or split["split_on"] > sample_time:
+        if split is None or split["split_on"] < sample_time:
             newdf[(fname_sample, sample_time)] = group.droplevel([level_sample, level_time])
             continue
         # TODO, make this recursive i.e. look what else this should get split into further down the line
@@ -113,7 +111,7 @@ def _plot_hist_default_norm(df, hue_level):
     level_values = df.index.unique(hue_level)
     return plt.Normalize(vmin=level_values.min(), vmax=level_values.max())
 
-def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None):
+def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hide_ticks=True):
     if cmap is None:
         cmap = _plot_hist_default_cmap()
     if norm is None:
@@ -134,7 +132,8 @@ def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None):
         bin_mass = bin_counts / bin_counts.sum()
         ax.fill_between(x=bins_ctr, y1=0, y2=bin_mass, alpha=0.4, color=cmap(norm(hue_val)))
     ax.set_ylim(bottom=0)
-    ax.set_yticks([])
+    if hide_ticks:
+        ax.set_yticks([])
     ax.set_xscale("log")
 
 def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=None, captions=None):
@@ -145,11 +144,20 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
     if title:
         ax.plot([], [], label=title, visible=False)
     if captions is None:
-        captions = lambda x: x
+        captions_func = lambda x: x
     elif isinstance(captions, dict):
-        captions = lambda x: captions.get(x, x)
+        captions_func = lambda x: captions.get(x, x)
+    elif callable(captions):
+        captions_func = captions
+    else:
+        raise ArgumentError()
     for hue_val in sorted(df.index.unique(hue_level), key=norm):
-        ax.fill_between(x=[], y1=[], y2=[], alpha=0.4, label=captions(hue_val), color=cmap(norm(hue_val)))
+        ax.fill_between(x=[], y1=[], y2=[], alpha=0.4, label=captions_func(hue_val), color=cmap(norm(hue_val)))
     ax.axis("off")
     legend = ax.legend(loc="center")
     adjust_legend_subtitles(legend)
+
+def counts(df, groupby=None):
+    if groupby is None:
+        groupby = df.index.names[:-1]
+    return df.iloc[:, 0].groupby(groupby).count().rename("counts")
