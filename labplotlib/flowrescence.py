@@ -128,21 +128,37 @@ def _plot_hist_default_cmap():
     return plt.cm.winter
 
 def _plot_hist_default_norm(df, hue_level):
-    level_values = df.index.unique(hue_level)
-    return plt.Normalize(vmin=level_values.min(), vmax=level_values.max())
+    if np.issubdtype(df.index.dtypes[hue_level], np.number):
+        level_values = df.index.unique(hue_level)
+        return plt.Normalize(vmin=level_values.min(), vmax=level_values.max())
+    else: # categorical data
+        return lambda x: x
 
-def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hide_ticks=True):
+def _plot_process_color_args(df, hue_level, cmap, norm):
     if cmap is None:
         cmap = _plot_hist_default_cmap()
+    elif isinstance(cmap, dict):
+        cmap_dict = dict(**cmap)
+        cmap = lambda x: cmap_dict[x]
     if norm is None:
-        norm = _plot_hist_default_norm(df, hue_level)
-    if data_column[:5] != "data_":
-        data_column = f"data_{data_column}"
-    assert data_column in FLUOR_CHANNELS
+        norm = _plot_hist_default_norm(df, hue_level)    
+    return cmap, norm
+
+def _plot_process_args(df, x_level=None, hue_level=None, data_column=None):
+    assert hue_level is not None
+    if data_column:
+        if data_column[:5] != "data_":
+            data_column = f"data_{data_column}"
+        assert data_column in FLUOR_CHANNELS
     df = squeeze_index(df)
     for level in df.index.names:
-        if level not in (hue_level, "fname_sample", "fname_specimen", None):
+        if level not in (x_level, hue_level, "fname_sample", "fname_specimen", None):
             warnings.warn(f"combining experiment conditions: {level} = {df.index.unique(level)}")
+    return df, x_level, hue_level, data_column
+
+def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hide_ticks=True):
+    cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
+    df, _, hue_level, data_column = _plot_process_args(df, None, hue_level, data_column)
     if isinstance(bins, int):
         bins = np.logspace(np.log10(df[data_column].min()), np.log10(df[data_column].max()), bins + 1)
     log_bins = np.log10(bins)
@@ -156,11 +172,12 @@ def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hid
         ax.set_yticks([])
     ax.set_xscale("log")
 
-def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=None, captions=None):
-    if cmap is None:
-        cmap = _plot_hist_default_cmap()
-    if norm is None:
-        norm = _plot_hist_default_norm(df, hue_level)
+def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=None, captions=None, sort_key=None, alpha=0.4):
+    cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
+    if sort_key is None:
+        sort_key = norm
+    elif isinstance(sort_key, list):
+        sort_key = sort_key.index
     if title:
         ax.plot([], [], label=title, visible=False)
     if captions is None:
@@ -171,11 +188,33 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
         captions_func = captions
     else:
         raise ArgumentError()
-    for hue_val in sorted(df.index.unique(hue_level), key=norm):
-        ax.fill_between(x=[], y1=[], y2=[], alpha=0.4, label=captions_func(hue_val), color=cmap(norm(hue_val)))
+    for hue_val in sorted(df.index.unique(hue_level), key=sort_key):
+        ax.fill_between(x=[], y1=[], y2=[], alpha=alpha, label=captions_func(hue_val), color=cmap(norm(hue_val)))
     ax.axis("off")
     legend = ax.legend(loc="center")
     adjust_legend_subtitles(legend)
+
+def plot_bar(ax, df, x_level, hue_level, cmap=None, norm=None, mean_column="mean_log10", std_column="std_log10"):
+    cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
+    df, x_level, hue_level, _ = _plot_process_args(df, x_level, hue_level, None)
+    x_pos, x_width = np.linspace(-0.9, 0.9, num=len(df.index.unique(hue_level)) + 4, retstep=True)
+    x_pos = x_pos[2:-2]
+    x_width *= 0.9
+    x_ticks = []
+    for i, (x_val, group) in enumerate(df.groupby(x_level)):
+        ax.bar(x_pos + i, np.power(10, group[mean_column]), width=x_width, color=[cmap(x) for x in group.index.get_level_values(hue_level)])
+        ax.errorbar(x=x_pos + i, y=np.power(10, group[mean_column]),
+            yerr=(
+                (- np.power(10, group[mean_column] - group[std_column]) + np.power(10, group[mean_column])),
+                (  np.power(10, group[mean_column] + group[std_column]) - np.power(10, group[mean_column]))),
+            color="k", fmt="none",
+            elinewidth=0.4, capsize=2, capthick=0.4)
+        x_ticks.append(x_val)
+    ax.set_yscale("log")
+    return x_ticks
+
+def plot_bar_legend(*args, **kwargs):
+    return plot_hist_legend(*args, **kwargs, alpha=1)
 
 def counts(df, groupby=None):
     if groupby is None:
