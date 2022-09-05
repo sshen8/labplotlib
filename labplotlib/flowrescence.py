@@ -10,6 +10,7 @@ from shapely.geometry import Polygon, Point, LineString
 import warnings
 from matplotlib import pyplot as plt
 from seaborn.utils import adjust_legend_subtitles
+from sklearn.mixture import GaussianMixture
 
 def read_csv(folder):
     """
@@ -100,6 +101,25 @@ def gate2d(df, boundary, interior=True):
         return (y <= m * x + b) == interior
     else:
         raise ArgumentError()
+
+def gmm(data, groupby):
+    if type(data) is not pd.Series:
+        raise ArgumentError(f"expecting pd.Series but got {type(data).__name__}")
+    def _calc_gmm(subdata):
+        vals = np.expand_dims(subdata, axis=1)
+        gm = GaussianMixture(n_components=2, random_state=2020).fit(vals)
+        # assume transduced cells have higher fluorescence than untransduced cells
+        transd_idx = gm.means_.squeeze().argmax()
+        untransd_idx = gm.means_.squeeze().argmin()
+        return {
+            "transd": gm.weights_[transd_idx].item(),
+            "mean": gm.means_[transd_idx].item(),
+            "var": gm.covariances_[transd_idx].item(),
+            "mean_untransd": gm.means_[untransd_idx].item(),
+            "var_untransd": gm.covariances_[untransd_idx].item(),
+        }
+    # TODO: consider untransduced cells together
+    return data.groupby(groupby).apply(_calc_gmm).unstack()
 
 def norm_day0(df):
     return
