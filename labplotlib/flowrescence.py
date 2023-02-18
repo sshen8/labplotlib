@@ -12,18 +12,21 @@ from matplotlib import pyplot as plt
 from seaborn.utils import adjust_legend_subtitles
 from sklearn.mixture import GaussianMixture
 
-def read_csv(folder):
+# TODO: https://github.com/matplotlib/matplotlib/issues/6321
+
+def read_csv(folder, well_id=True):
     """
     subfolders in `folder` are "specimens". csv files in subfolders are "samples".
     returns concatenated dataframes where index is (specimen, sample)
     """
+    regex_pattern = "[A-H]1?[0-9]_(.*)\.csv" if well_id else "(.*)\.csv"
     df = {}
     for folder_specimen in os.listdir(folder):
         subfolder = os.path.join(folder, folder_specimen)
         if not os.path.isdir(subfolder):
             continue
         for file in os.listdir(subfolder):
-            sample_name = re.search("[A-H]1?[0-9]_(.*)\.csv", file).group(1)
+            sample_name = re.search(regex_pattern, file).group(1)
             df[(folder_specimen, sample_name)] = pd.read_csv(os.path.join(subfolder, file)).add_prefix("data_")
     return pd.concat(df, names=("fname_specimen", "fname_sample"))
 
@@ -47,7 +50,7 @@ def parse_index(df, level, regex=None, apply=None, names=None, replace=None, def
             if not match:
                 warnings.warn(f"dropping {idx} because no regex match")
                 continue
-            ind = tuple(match[x] if match[x] else default.get(x) for x in names)
+            ind = tuple(match[x] if match[x] else default.get(x, "") for x in names)
         elif apply is not None:
             ind = apply(idx)
         elif replace is not None:
@@ -82,6 +85,8 @@ def log10(series):
 FLUOR_CHANNELS = (
     "data_PE-Texas Red-H", "data_PE-Texas Red-A",
     "data_FITC-H", "data_FITC-A",
+    "data_mCherry-H", "data_mCherry-A",
+    "data_APC-H", "data_APC-A",
     )
 
 def gate2d(df, boundary, interior=True):
@@ -150,9 +155,8 @@ def _plot_process_args(df, x_level=None, hue_level=None, data_column=None):
         if data_column[:5] != "data_":
             data_column = f"data_{data_column}"
         assert data_column in FLUOR_CHANNELS
-    df = squeeze_index(df)
     for level in df.index.names:
-        if level not in (x_level, hue_level, "fname_sample", "fname_specimen", None):
+        if level not in (x_level, hue_level, "fname_sample", "fname_specimen", None) and len(df.index.unique(level)) > 1:
             warnings.warn(f"combining experiment conditions: {level} = {df.index.unique(level)}")
     return df, x_level, hue_level, data_column
 
@@ -178,6 +182,9 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
         sort_key = norm
     elif isinstance(sort_key, list):
         sort_key = sort_key.index
+    vals = df.index.unique(hue_level)
+    if sort_key:
+        vals = sorted(vals, key=sort_key)
     if title:
         ax.plot([], [], label=title, visible=False)
     if captions is None:
@@ -188,7 +195,7 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
         captions_func = captions
     else:
         raise ArgumentError()
-    for hue_val in sorted(df.index.unique(hue_level), key=sort_key):
+    for hue_val in vals:
         ax.fill_between(x=[], y1=[], y2=[], alpha=alpha, label=captions_func(hue_val), color=cmap(norm(hue_val)))
     ax.axis("off")
     legend = ax.legend(loc="center")
@@ -197,18 +204,20 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
 def plot_bar(ax, df, x_level, hue_level, cmap=None, norm=None, mean_column="mean_log10", std_column="std_log10"):
     cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
     df, x_level, hue_level, _ = _plot_process_args(df, x_level, hue_level, None)
-    x_pos, x_width = np.linspace(-0.9, 0.9, num=len(df.index.unique(hue_level)) + 4, retstep=True)
-    x_pos = x_pos[2:-2]
+    x_pos, x_width = np.linspace(-0.45, 0.45, num=len(df.index.unique(hue_level)) + 1, retstep=True)
+    x_pos = x_pos + 0.5 * x_width
+    x_pos = x_pos[:-1]
     x_width *= 0.9
     x_ticks = []
     for i, (x_val, group) in enumerate(df.groupby(x_level)):
-        ax.bar(x_pos + i, np.power(10, group[mean_column]), width=x_width, color=[cmap(x) for x in group.index.get_level_values(hue_level)])
-        ax.errorbar(x=x_pos + i, y=np.power(10, group[mean_column]),
-            yerr=(
-                (- np.power(10, group[mean_column] - group[std_column]) + np.power(10, group[mean_column])),
-                (  np.power(10, group[mean_column] + group[std_column]) - np.power(10, group[mean_column]))),
-            color="k", fmt="none",
-            elinewidth=0.4, capsize=2, capthick=0.4)
+        ax.bar(x_pos + i, np.power(10, group[mean_column]), width=x_width, color=[cmap(norm(x)) for x in group.index.get_level_values(hue_level)])
+        if std_column:
+            ax.errorbar(x=x_pos + i, y=np.power(10, group[mean_column]),
+                yerr=(
+                    (- np.power(10, group[mean_column] - group[std_column]) + np.power(10, group[mean_column])),
+                    (  np.power(10, group[mean_column] + group[std_column]) - np.power(10, group[mean_column]))),
+                color="k", fmt="none",
+                elinewidth=0.4, capsize=2, capthick=0.4)
         x_ticks.append(x_val)
     ax.set_yscale("log")
     return x_ticks
