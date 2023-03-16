@@ -80,7 +80,18 @@ def squeeze_index(df):
     return df.droplevel([idx for idx in df.index.names if df.index.unique(idx).size <= 1])
 
 def log10(series):
-    return np.log10(series.clip(lower=1))
+    return np.log10(np.maximum(series, 1))
+
+def geomean(series, axis=None):
+    return np.power(10, np.mean(log10(series), axis=axis))
+
+def geomstd(series, axis=None):
+    logstd = np.std(log10(series), axis=axis)
+    logmean = np.mean(log10(series), axis=axis)
+    return (
+          geomean(series, axis=axis) - np.power(10, logmean - logstd),
+        - geomean(series, axis=axis) + np.power(10, logmean + logstd),
+        )
 
 FLUOR_CHANNELS = (
     "data_PE-Texas Red-H", "data_PE-Texas Red-A",
