@@ -193,7 +193,10 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
         sort_key = norm
     elif isinstance(sort_key, list):
         sort_key = sort_key.index
-    vals = df.index.unique(hue_level)
+    if hue_level in df.columns:
+        vals = df[hue_level].unique()
+    else:
+        vals = df.index.unique(hue_level)
     if sort_key:
         vals = sorted(vals, key=sort_key)
     if title:
