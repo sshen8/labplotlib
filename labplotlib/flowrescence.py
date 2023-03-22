@@ -171,13 +171,21 @@ def _plot_process_args(df, x_level=None, hue_level=None, data_column=None):
             warnings.warn(f"combining experiment conditions: {level} = {df.index.unique(level)}")
     return df, x_level, hue_level, data_column
 
-def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hide_ticks=True):
+def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hide_ticks=True, log=True):
     cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
     df, _, hue_level, data_column = _plot_process_args(df, None, hue_level, data_column)
     if isinstance(bins, int):
-        bins = np.logspace(np.log10(df[data_column].min()), np.log10(df[data_column].max()), bins + 1)
-    log_bins = np.log10(bins)
-    bins_ctr = np.power(10, log_bins[:-1] + 0.5 * np.diff(log_bins))
+        if log:
+            bins = np.logspace(np.log10(df[data_column].min()), np.log10(df[data_column].max()), bins + 1)
+        else:
+            bins = np.linspace(df[data_column].min(), df[data_column].max(), bins + 1)
+    # Get bin centers as half way between bin edges
+    def _get_bins_ctr(_bins):
+        return _bins[:-1] + 0.5 * np.diff(_bins)
+    if log:
+        bins_ctr = np.power(10, _get_bins_ctr(np.log10(bins)))
+    else:
+        bins_ctr = _get_bins_ctr(bins)
     for hue_val, group in df.groupby(hue_level):
         bin_counts, _ = np.histogram(group[data_column], bins=bins)
         bin_mass = bin_counts / bin_counts.sum()
@@ -185,7 +193,8 @@ def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hid
     ax.set_ylim(bottom=0)
     if hide_ticks:
         ax.set_yticks([])
-    ax.set_xscale("log")
+    if log:
+        ax.set_xscale("log")
 
 def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=None, captions=None, sort_key=None, alpha=0.4):
     cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
@@ -215,7 +224,7 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
     legend = ax.legend(loc="center")
     adjust_legend_subtitles(legend)
 
-def plot_bar(ax, df, x_level, hue_level, cmap=None, norm=None, mean_column="mean_log10", std_column="std_log10"):
+def plot_bar(ax, df, x_level, hue_level, cmap=None, norm=None, mean_column="mean_log10", std_column="std_log10", log=True):
     cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
     df, x_level, hue_level, _ = _plot_process_args(df, x_level, hue_level, None)
     x_pos, x_width = np.linspace(-0.45, 0.45, num=len(df.index.unique(hue_level)) + 1, retstep=True)
@@ -224,16 +233,24 @@ def plot_bar(ax, df, x_level, hue_level, cmap=None, norm=None, mean_column="mean
     x_width *= 0.9
     x_ticks = []
     for i, (x_val, group) in enumerate(df.groupby(x_level)):
-        ax.bar(x_pos + i, np.power(10, group[mean_column]), width=x_width, color=[cmap(norm(x)) for x in group.index.get_level_values(hue_level)])
+        x = x_pos + i
+        if log:
+            y = np.power(10, y)
+        else:
+            y = group[mean_column]
+        ax.bar(x, y, width=x_width, color=[cmap(norm(c)) for c in group.index.get_level_values(hue_level)])
         if std_column:
-            ax.errorbar(x=x_pos + i, y=np.power(10, group[mean_column]),
-                yerr=(
+            if log:
+                yerr = (
                     (- np.power(10, group[mean_column] - group[std_column]) + np.power(10, group[mean_column])),
-                    (  np.power(10, group[mean_column] + group[std_column]) - np.power(10, group[mean_column]))),
-                color="k", fmt="none",
-                elinewidth=0.4, capsize=2, capthick=0.4)
+                    (  np.power(10, group[mean_column] + group[std_column]) - np.power(10, group[mean_column]))
+                    )
+            else:
+                yerr = group[std_column]
+            ax.errorbar(x=x, y=y, yerr=yerr, color="k", fmt="none", elinewidth=0.4, capsize=2, capthick=0.4)
         x_ticks.append(x_val)
-    ax.set_yscale("log")
+    if log:
+        ax.set_yscale("log")
     return x_ticks
 
 def plot_bar_legend(*args, **kwargs):
