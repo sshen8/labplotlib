@@ -11,23 +11,37 @@ import warnings
 from matplotlib import pyplot as plt
 from seaborn.utils import adjust_legend_subtitles
 from sklearn.mixture import GaussianMixture
+import flowkit as fk
 
 # TODO: https://github.com/matplotlib/matplotlib/issues/6321
 
-def read_csv(folder, well_id=True):
+def read_csv(folder, well_id=True, format="csv"):
     """
     subfolders in `folder` are "specimens". csv files in subfolders are "samples".
     returns concatenated dataframes where index is (specimen, sample)
     """
-    regex_pattern = "[A-H]1?[0-9]_(.*)\.csv" if well_id else "(.*)\.csv"
+    assert format in ("csv", "fcs")
+    regex_pattern = f"[A-H]1?[0-9]_(.*)\.{format}" if well_id else f"(.*)\.{format}"
     df = {}
     for folder_specimen in os.listdir(folder):
         subfolder = os.path.join(folder, folder_specimen)
         if not os.path.isdir(subfolder):
             continue
         for file in os.listdir(subfolder):
-            sample_name = re.search(regex_pattern, file).group(1)
-            df[(folder_specimen, sample_name)] = pd.read_csv(os.path.join(subfolder, file)).add_prefix("data_")
+            match = re.search(regex_pattern, file)
+            if not match:
+                warnings.warn(f"Skipping {file}")
+                continue
+            sample_name = match.group(1)
+            fname = os.path.join(subfolder, file)
+            if format == "csv":
+                df_sub = pd.read_csv(fname)
+            elif format == "fcs":
+                samp = fk.Sample(fname)
+                cols = samp.channels["pns"]
+                cols.where(cols != "", samp.channels["pnn"], inplace=True)
+                df_sub = pd.DataFrame(samp.get_events(source="raw"), columns=cols)
+            df[(folder_specimen, sample_name)] = df_sub.add_prefix("data_")
     return pd.concat(df, names=("fname_specimen", "fname_sample"))
 
 def parse_index(df, level, regex=None, apply=None, names=None, replace=None, default=None, droplevel=False):
