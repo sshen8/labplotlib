@@ -110,6 +110,7 @@ def geomstd(series, axis=None):
 FLUOR_CHANNELS = (
     "data_PE-Texas Red-H", "data_PE-Texas Red-A",
     "data_FITC-H", "data_FITC-A",
+    "data_GFP-H", "data_GFP-A",
     "data_mCherry-H", "data_mCherry-A",
     "data_APC-H", "data_APC-A",
     )
@@ -180,8 +181,14 @@ def _plot_process_args(df, x_level=None, hue_level=None, data_column=None):
         if data_column[:5] != "data_":
             data_column = f"data_{data_column}"
         assert data_column in FLUOR_CHANNELS
+    whitelist = ["fname_sample", "fname_specimen", None]
+    for level in (x_level, hue_level):
+        if isinstance(level, list):
+            whitelist.extend(level)
+        else:
+            whitelist.append(level)
     for level in df.index.names:
-        if level not in (x_level, hue_level, "fname_sample", "fname_specimen", None) and len(df.index.unique(level)) > 1:
+        if level not in whitelist and len(df.index.unique(level)) > 1:
             warnings.warn(f"combining experiment conditions: {level} = {df.index.unique(level)}")
     return df, x_level, hue_level, data_column
 
@@ -190,7 +197,7 @@ def plot_hist(ax, df, hue_level, data_column, bins=40, cmap=None, norm=None, hid
     df, _, hue_level, data_column = _plot_process_args(df, None, hue_level, data_column)
     if isinstance(bins, int):
         if log:
-            bins = np.logspace(np.log10(df[data_column].min()), np.log10(df[data_column].max()), bins + 1)
+            bins = np.logspace(log10(df[data_column]).min(), log10(df[data_column]).max(), bins + 1)
         else:
             bins = np.linspace(df[data_column].min(), df[data_column].max(), bins + 1)
     # Get bin centers as half way between bin edges
@@ -241,18 +248,17 @@ def plot_hist_legend(ax, df=None, hue_level=None, cmap=None, norm=None, title=No
 def plot_bar(ax, df, x_level, hue_level, cmap=None, norm=None, mean_column="mean_log10", std_column="std_log10", log=True):
     cmap, norm = _plot_process_color_args(df, hue_level, cmap, norm)
     df, x_level, hue_level, _ = _plot_process_args(df, x_level, hue_level, None)
-    x_pos, x_width = np.linspace(-0.45, 0.45, num=len(df.index.unique(hue_level)) + 1, retstep=True)
-    x_pos = x_pos + 0.5 * x_width
-    x_pos = x_pos[:-1]
-    x_width *= 0.9
+    x_width = 0.9 / len(df.index.unique(hue_level))
     x_ticks = []
     for i, (x_val, group) in enumerate(df.groupby(x_level)):
+        x_pos = np.arange(group.index.nunique(hue_level)) * x_width
+        x_pos = x_pos - x_pos.mean() # center at zero
         x = x_pos + i
         if log:
             y = np.power(10, y)
         else:
             y = group[mean_column]
-        ax.bar(x, y, width=x_width, color=[cmap(norm(c)) for c in group.index.get_level_values(hue_level)])
+        ax.bar(x, y, width=0.9 * x_width, color=[cmap(norm(c)) for c in group.index.get_level_values(hue_level)])
         if std_column:
             if log:
                 yerr = (
